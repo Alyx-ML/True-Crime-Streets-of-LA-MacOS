@@ -1,0 +1,9 @@
+{
+  "upstream": "https://github.com/ucb-bar/berkeley-softfloat-3",
+  "commit": "a0c6494cdc11865811dec815d5c0049fba9d82a8",
+  "release": "3e",
+  "specialization": "8086-SSE",
+  "license": "BSD-3-Clause; see berkeley-softfloat-3/COPYING.txt",
+  "local_source_changes": false,
+  "build": "Single-precision subset compiled into tc_sse with thread-local state"
+}

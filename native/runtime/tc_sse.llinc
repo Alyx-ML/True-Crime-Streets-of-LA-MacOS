@@ -1,0 +1,55 @@
+; Helpers preserve all scalar CPU registers and operate on exact XMM bits.
+funcv tc_xmm_copy $, destination, source
+; CPUID returns the statically supported guest feature profile.
+funcv tc_cpuid $
+funcv tc_unsupported_instruction $, address
+funcv tc_store_fence
+funcv tc_xmm_load $, destination, address, alignment
+funcv tc_xmm_store $, source, address, alignment
+funcv tc_xmm_copy32 $, destination, source
+funcv tc_xmm_load32 $, destination, address
+funcv tc_xmm_store32 $, source, address
+funcv tc_xmm_shuffle $, destination, source, from_memory, control
+funcv tc_xmm_logic $, destination, source, from_memory, operation
+funcv tc_xmm_unpack $, destination, source, from_memory, high
+funcv tc_xmm_movlh $, destination, source
+funcv tc_xmm_arithmetic $, destination, source, from_memory, scalar, operation
+funcv tc_mxcsr_load $, address
+funcv tc_mxcsr_store $, address
+funcv tc_xmm_compare $, destination, source, from_memory, quiet
+funcv tc_xmm_from_i32 $, destination, source, from_memory
+funcv tc_xmm_to_i32 $, destination, source, from_memory, truncate
+funcv tc_xmm_minmax $, destination, source, from_memory, scalar, maximum
+funcv tc_xmm_compare_mask $, destination, source, from_memory, scalar, predicate
+funcv tc_xmm_movemask $, destination, source
+funcv tc_xmm_rsqrt $, destination, source, from_memory, scalar
+funcv tc_xmm_rcp $, destination, source, from_memory, scalar
+funcv tc_x87_compare $, source, quiet, pop
+funcv tc_x87_sincos $
+funcv tc_shift32 $, destination, value, count, operation
+funcv tc_cmps32 $, repeat
+funcv tc_xmm_bits32 $, destination, source
+funcv tc_xmm_move64 $, xmm, source, mode
+funcv tc_xmm_sse2 $, destination, source, mode, operation
+funcv tc_xmm_compare_pd $, destination, source, from_memory, predicate
+funcv tc_xmm_add64 $, destination, source, from_memory, subtract
+
+funcv tc_double_shift32 $, destination, value, source, count, right
+funcv tc_x87_atan $
+funcv tc_x87_exp2m1 $
+funcv tc_x87_scale $
+funcv tc_x87_misc $, op, index
+funcv tc_x87_pi $
+funcv tc_x87_load80 $, address
+funcv tc_x87_clear $
+funcv tc_shift_part $, destination, whole, count, operation, width, offset
+funcv tc_x87_round $
+func tc_read_fs $, offset
+funcv tc_write_fs $, offset, value
+funcv tc_import_dispatch $, slot
+funcv tc_d3d_dispatch $, method
+funcv tc_di_dispatch $, method
+funcv tc_ds_dispatch $, method
+
+funcv tc_menu_refresh $, screen, controls
+funcv tc_menu_event $, screen

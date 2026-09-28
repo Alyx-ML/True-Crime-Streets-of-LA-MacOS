@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+native/build/
+native/dist/
+native/generated/
+native/analysis/
+native/vendor/*
+!native/vendor/*-provenance.json
+# Never commit game files.
+*.exe
+*.EXE
+*.bik
+*.BIK
+DATA/
+Data/
+Movies/
+Saves/

@@ -1,0 +1,6 @@
+{
+  "version": "1.43.0",
+  "url": "https://github.com/ldc-developers/ldc/releases/download/v1.43.0/ldc2-1.43.0-osx-arm64.tar.xz",
+  "sha256": "5e332349c784d4e0b1c4622284803880f89d97ef1ef97c6b25aa4d6b094c5fed",
+  "purpose": "Build the upstream LLasm-to-LLVM offline compiler locally"
+}

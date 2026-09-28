@@ -1,0 +1,1859 @@
+diff --git a/SR/llasm-support/llasm_cpu.h b/SR/llasm-support/llasm_cpu.h
+index 7cddec7..c5f0a91 100644
+--- a/SR/llasm-support/llasm_cpu.h
++++ b/SR/llasm-support/llasm_cpu.h
+@@ -74,7 +74,7 @@ typedef struct {
+ #ifdef PTROFS_64BIT
+ 
+ #define REG2PTR(x) ((void *)((uintptr_t)(x) + cpu->_pointer_offset))
+-#define PTR2REG(x) ((nullptr == (x)) ? 0 : (uint32_t)((uintptr_t)(x) - cpu->_pointer_offset))
++#define PTR2REG(x) (((x) == 0) ? 0 : (uint32_t)((uintptr_t)(x) - cpu->_pointer_offset))
+ 
+ #else
+ 
+diff --git a/SR/llasm-support/llasm_divide.c b/SR/llasm-support/llasm_divide.c
+index 6b4f459..8be2a58 100644
+--- a/SR/llasm-support/llasm_divide.c
++++ b/SR/llasm-support/llasm_divide.c
+@@ -25,124 +25,135 @@
+  */
+ 
+ #include "llasm_cpu.h"
++#include <stdlib.h>
++#include <limits.h>
+ 
+-
+-EXTERNC void CCALL x86_div_64_64(CPU, uint32_t *div)
++/* Reject division faults before changing registers. Guest #DE delivery is
++   unfinished; abort is the runtime's existing unsupported-exception policy. */
++static uint64_t divide_unsigned(uint64_t value, uint64_t divisor, uint64_t maximum)
+ {
+-    uint64_t dividend, divisor, result;
+-
+-    dividend = div[0] | (((uint64_t)div[1]) << 32);
+-    divisor = div[2] | (((uint64_t)div[3]) << 32);
++    if (!divisor) abort();
++    uint64_t quotient = value / divisor;
++    if (quotient > maximum) abort();
++    return quotient;
++}
+ 
+-    result = dividend / divisor;
++static int64_t divide_signed(int64_t value, int64_t divisor, int64_t minimum, int64_t maximum)
++{
++    if (!divisor || (value == INT64_MIN && divisor == -1)) abort();
++    int64_t quotient = value / divisor;
++    if (quotient < minimum || quotient > maximum) abort();
++    return quotient;
++}
+ 
+-    eax = (uint32_t) result;
+-    edx = (uint32_t) (result >> 32);
++EXTERNC void CCALL x86_div_64_64(CPU, uint32_t *div)
++{
++    uint64_t value = div[0] | ((uint64_t)div[1] << 32);
++    uint64_t divisor = div[2] | ((uint64_t)div[3] << 32);
++    uint64_t result = divide_unsigned(value, divisor, UINT64_MAX);
++    eax = (uint32_t)result;
++    edx = (uint32_t)(result >> 32);
+ }
+ 
+ EXTERNC void CCALL x86_div_64(CPU, uint32_t divisor)
+ {
+-    if (edx != 0)
+-    {
+-        uint64_t dividend;
+-
+-        dividend = (((uint64_t)edx) << 32) | eax;
+-
+-        eax = (uint32_t) (dividend / divisor);
+-        edx = (uint32_t) (dividend % divisor);
+-    }
+-    else
+-    {
+-        edx = (uint32_t) (eax % divisor);
+-        eax = (uint32_t) (eax / divisor);
+-    }
++    uint64_t value = ((uint64_t)edx << 32) | eax;
++    uint32_t quotient = (uint32_t)divide_unsigned(value, divisor, UINT32_MAX);
++    edx = (uint32_t)(value % divisor);
++    eax = quotient;
+ }
+ 
+-
+ EXTERNC void CCALL x86_div_32(CPU, uint32_t divisor)
+ {
+-    uint32_t dividend, quotient, remainder;
+-
+-    dividend = (edx << 16) | (eax & 0xffff);
+-
+-    quotient = (uint32_t) (dividend / divisor);
+-    remainder = (uint32_t) (dividend % divisor);
+-
+-    eax = (eax & 0xffff0000) | (quotient & 0xffff);
+-    edx = (edx & 0xffff0000) | (remainder & 0xffff);
++    uint32_t value = (edx << 16) | (eax & 0xffff);
++    divisor &= 0xffff;
++    uint32_t quotient = (uint32_t)divide_unsigned(value, divisor, UINT16_MAX);
++    eax = (eax & 0xffff0000) | quotient;
++    edx = (edx & 0xffff0000) | (value % divisor);
+ }
+ 
+-
+ EXTERNC void CCALL x86_div_16(CPU, uint32_t divisor)
+ {
+-    uint16_t dividend;
+-    uint32_t quotient, remainder;
+-
+-    dividend = (uint16_t)(eax & 0xffff);
+-
+-    quotient = (uint32_t) (dividend / divisor);
+-    remainder = (uint32_t) (dividend % divisor);
+-
+-    eax = (eax & 0xffff0000) | (quotient & 0xff) | ((remainder & 0xff) << 8);
++    uint32_t value = eax & 0xffff;
++    divisor &= 0xff;
++    uint32_t quotient = (uint32_t)divide_unsigned(value, divisor, UINT8_MAX);
++    eax = (eax & 0xffff0000) | quotient | ((value % divisor) << 8);
+ }
+ 
+-
+ EXTERNC void CCALL x86_idiv_64_64(CPU, uint32_t *div)
+ {
+-    int64_t dividend, divisor, result;
+-
+-    dividend = div[0] | (((uint64_t)div[1]) << 32);
+-    divisor = div[2] | (((uint64_t)div[3]) << 32);
+-
+-    result = dividend / divisor;
+-
+-    eax = (uint32_t) result;
+-    edx = (uint32_t) (result >> 32);
++    int64_t value = (int64_t)(div[0] | ((uint64_t)div[1] << 32));
++    int64_t divisor = (int64_t)(div[2] | ((uint64_t)div[3] << 32));
++    uint64_t result = (uint64_t)divide_signed(value, divisor, INT64_MIN, INT64_MAX);
++    eax = (uint32_t)result;
++    edx = (uint32_t)(result >> 32);
+ }
+ 
+ EXTERNC void CCALL x86_idiv_64(CPU, int32_t divisor)
+ {
+-    if ((int32_t)edx != (((int32_t)eax) >> 31))
+-    {
+-        int64_t dividend;
+-
+-        dividend = (((uint64_t)edx) << 32) | eax;
+-
+-        eax = (int32_t) (dividend / divisor);
+-        edx = (int32_t) (dividend % divisor);
+-    }
+-    else
+-    {
+-        edx = (int32_t) (((int32_t)eax) % divisor);
+-        eax = (int32_t) (((int32_t)eax) / divisor);
+-    }
++    int64_t value = (int64_t)(((uint64_t)edx << 32) | eax);
++    int32_t quotient = (int32_t)divide_signed(value, divisor, INT32_MIN, INT32_MAX);
++    edx = (uint32_t)(value % divisor);
++    eax = (uint32_t)quotient;
+ }
+ 
+-
+ EXTERNC void CCALL x86_idiv_32(CPU, int32_t divisor)
+ {
+-    int32_t dividend, quotient, remainder;
+-
+-    dividend = (edx << 16) | (eax & 0xffff);
+-
+-    quotient = (int32_t) (dividend / divisor);
+-    remainder = (int32_t) (dividend % divisor);
+-
++    int64_t value = (int32_t)((edx << 16) | (eax & 0xffff));
++    divisor = (int16_t)divisor;
++    uint32_t quotient = (uint32_t)divide_signed(value, divisor, INT16_MIN, INT16_MAX);
+     eax = (eax & 0xffff0000) | (quotient & 0xffff);
+-    edx = (edx & 0xffff0000) | (remainder & 0xffff);
++    edx = (edx & 0xffff0000) | ((uint32_t)(value % divisor) & 0xffff);
+ }
+ 
+-
+ EXTERNC void CCALL x86_idiv_16(CPU, int32_t divisor)
+ {
+-    int16_t dividend;
+-    int32_t quotient, remainder;
+-
+-    dividend = (int16_t)(eax & 0xffff);
+-
+-    quotient = (int32_t) (dividend / divisor);
+-    remainder = (int32_t) (dividend % divisor);
+-
+-    eax = (eax & 0xffff0000) | (quotient & 0xff) | ((remainder & 0xff) << 8);
++    int32_t value = (int16_t)eax;
++    divisor = (int8_t)divisor;
++    uint32_t quotient = (uint32_t)divide_signed(value, divisor, INT8_MIN, INT8_MAX);
++    eax = (eax & 0xffff0000) | (quotient & 0xff) | (((uint32_t)(value % divisor) & 0xff) << 8);
+ }
+ 
++#ifdef TC_DIVIDE_SELF_CHECK
++#include <assert.h>
++#include <signal.h>
++#include <sys/resource.h>
++#include <sys/wait.h>
++#include <unistd.h>
++int main(void)
++{
++    _cpu registers = {0};
++    _cpu *cpu = &registers;
++    eax = 7;
++    x86_div_64(cpu, 3);
++    assert(eax == 2 && edx == 1);
++    eax = (uint32_t)-7;
++    edx = UINT32_MAX;
++    x86_idiv_64(cpu, 3);
++    assert(eax == (uint32_t)-2 && edx == UINT32_MAX);
++    eax = 0xabcdfff9;
++    edx = 0x1234ffff;
++    x86_idiv_32(cpu, 3);
++    assert(eax == 0xabcdfffe && edx == 0x1234ffff);
++    eax = 0x1234fff9;
++    x86_idiv_16(cpu, 3);
++    assert(eax == 0x1234fffe);
++    /* Fault cases run only when this optional check is explicitly invoked. */
++    for (unsigned fault = 0; fault < 3; ++fault) {
++        pid_t child = fork();
++        assert(child >= 0);
++        if (!child) {
++            struct rlimit limit = {0, 0};
++            setrlimit(RLIMIT_CORE, &limit);
++            if (fault == 0) divide_unsigned(1, 0, UINT32_MAX);
++            if (fault == 1) divide_unsigned(UINT64_C(1) << 32, 1, UINT32_MAX);
++            if (fault == 2) divide_signed(INT64_MIN, -1, INT64_MIN, INT64_MAX);
++            _exit(0);
++        }
++        int status;
++        assert(waitpid(child, &status, 0) == child);
++        assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
++    }
++    return 0;
++}
++#endif
+diff --git a/SR/llasm-support/llasm_float.c b/SR/llasm-support/llasm_float.c
+index d009713..f71a0d2 100644
+--- a/SR/llasm-support/llasm_float.c
++++ b/SR/llasm-support/llasm_float.c
+@@ -25,6 +25,13 @@
+  */
+ 
+ #include "llasm_cpu.h"
++
++#ifdef TC_GUEST_X87_RESULTS
++EXTERNC uint32_t CCALL tc_x87_result(CPU, const void *value);
++#define X87_RESULT_PTR(value) tc_x87_result(cpu, (value))
++#else
++#define X87_RESULT_PTR(value) PTR2REG(value)
++#endif
+ #if !defined(__USE_ISOC99)
+     #define __USE_ISOC99
+ #endif
+@@ -503,10 +510,10 @@ EXTERNC uint32_t CCALL x87_fistp_int64(CPU)
+         presult->low = uval.low;
+         presult->high = uval.high;
+ 
+-        return PTR2REG(presult);
++        return X87_RESULT_PTR(presult);
+ #else
+         st_result = INT64_C(0x8000000000000000);
+-        return PTR2REG(&(st_result));
++        return X87_RESULT_PTR(&(st_result));
+ #endif
+     }
+ 
+@@ -543,10 +550,10 @@ EXTERNC uint32_t CCALL x87_fistp_int64(CPU)
+     presult->low = uval.low;
+     presult->high = uval.high;
+ 
+-    return PTR2REG(presult);
++    return X87_RESULT_PTR(presult);
+ #else
+     st_result = ival;
+-    return PTR2REG(&(st_result));
++    return X87_RESULT_PTR(&(st_result));
+ #endif
+ }
+ 
+@@ -762,14 +769,14 @@ EXTERNC uint32_t CCALL x87_fst_double(CPU)
+     presult->low = pst0->low;
+     presult->high = pst0->high;
+ 
+-    return PTR2REG(presult);
++    return X87_RESULT_PTR(presult);
+ #else
+     void *presult;
+ 
+     CLEAR_X87_FLAGS;
+     presult = &(ST0);
+ 
+-    return PTR2REG(presult);
++    return X87_RESULT_PTR(presult);
+ #endif
+ }
+ 
+@@ -801,13 +808,13 @@ EXTERNC uint32_t CCALL x87_fstp_double(CPU)
+     presult->high = pst0->high;
+ 
+     POP_REGS;
+-    return PTR2REG(presult);
++    return X87_RESULT_PTR(presult);
+ #else
+     void *presult;
+ 
+     presult = &(ST0);
+     POP_REGS;
+-    return PTR2REG(presult);
++    return X87_RESULT_PTR(presult);
+ #endif
+ }
+ 
+@@ -882,6 +889,12 @@ EXTERNC void CCALL x87_fsubr_st(CPU, int num)
+     ST0 = ST(num) - ST0;
+ }
+ 
++EXTERNC void CCALL x87_fsubr_to_st(CPU, int num)
++{
++    ST(num) = ST0 - ST(num);
++    CLEAR_X87_FLAGS;
++}
++
+ EXTERNC void CCALL x87_fsubrp_st(CPU, int num)
+ {
+     ST(num) = ST0 - ST(num);
+@@ -1126,10 +1139,10 @@ EXTERNC uint32_t CCALL x87_ftol_int64(CPU)
+     presult->low = ret.low;
+     presult->high = ret.high;
+ 
+-    return PTR2REG(presult);
++    return X87_RESULT_PTR(presult);
+ #else
+     st_result = ((orig < 9223372036854775808.0) && (orig > -9223372036854775808.0))?((int64_t) trunc(orig)):INT64_C(0x8000000000000000);
+-    return PTR2REG(&(st_result));
++    return X87_RESULT_PTR(&(st_result));
+ #endif
+ }
+ 
+diff --git a/SR/llasm-support/llasm_float.llinc b/SR/llasm-support/llasm_float.llinc
+index 04c456d..4804883 100644
+--- a/SR/llasm-support/llasm_float.llinc
++++ b/SR/llasm-support/llasm_float.llinc
+@@ -111,6 +111,7 @@ funcv x87_fsubp_st $, num
+ funcv x87_fsubr_float $, num
+ funcv x87_fsubr_double $, num_low, num_high
+ funcv x87_fsubr_st $, num
++funcv x87_fsubr_to_st $, num
+ funcv x87_fsubrp_st $, num
+ 
+ funcv x87_fucom_st $, num
+@@ -444,6 +445,10 @@ macro FSUBR_ST num
+     call x87_fsubr_st $, \num
+ endm
+ 
++macro FSUBR_TO_ST num
++    call x87_fsubr_to_st $, \num
++endm
++
+ macro FSUBRP_ST num
+     call x87_fsubrp_st $, \num
+ endm
+diff --git a/SRW/SRW_loader.c b/SRW/SRW_loader.c
+index 7ae6bbd..b14a1f5 100644
+--- a/SRW/SRW_loader.c
++++ b/SRW/SRW_loader.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+@@ -689,7 +689,11 @@ int SRW_LoadFile(const char *fname)
+ 
+     // check relocations
+     need_external_relocations = 0;
+-    if (Header->FileHeader.Characteristics & 1)
++    if (fixed_guest_image)
++    {
++        fprintf(stderr, "Fixed guest image: retain original address operands; runtime must map the preferred image base and resolve guest code addresses\n");
++    }
++    else if (Header->FileHeader.Characteristics & 1)
+     {
+         /*unload_file(&mf);
+         fprintf(stderr, "Error: Relocations were stripped from file :(\n");
+@@ -993,7 +997,12 @@ int SRW_LoadFile(const char *fname)
+     SR_get_section_reladr(Header->OptionalHeader.ImageBase + Header->OptionalHeader.AddressOfEntryPoint, &EIPObjectNum, &EIP);
+ 
+     // create fixup table
+-    if (need_external_relocations)
++    if (fixed_guest_image)
++    {
++        /* No rebasing: original data pointers, immediates and displacements stay
++           in the guest address space. This does not discover indirect code. */
++    }
++    else if (need_external_relocations)
+     {
+         if (LoadRelocations(Header))
+         {
+@@ -1122,6 +1131,7 @@ int SRW_LoadFile(const char *fname)
+                         {
+                             case 1: ProcName = "DirectSoundCreate"; break;
+                             case 2: ProcName = "DirectSoundEnumerateA"; break;
++                            case 11: ProcName = "DirectSoundCreate8"; break;
+                         }
+                     }
+ 
+@@ -1138,6 +1148,7 @@ int SRW_LoadFile(const char *fname)
+                             case   8: ProcName = "ws2_32.htonl"; break;
+                             case   9: ProcName = "ws2_32.htons"; break;
+                             case  10: ProcName = "ws2_32.inet_addr"; break;
++                            case  11: ProcName = "ws2_32.inet_ntoa"; break;
+                             case  12: ProcName = "ws2_32.ioctlsocket"; break;
+                             case  13: ProcName = "ws2_32.listen"; break;
+                             case  14: ProcName = "ws2_32.ntohl"; break;
+@@ -1154,6 +1165,8 @@ int SRW_LoadFile(const char *fname)
+                             case  57: ProcName = "ws2_32.gethostname"; break;
+                             case 111: ProcName = "ws2_32.WSAGetLastError"; break;
+                             case 115: ProcName = "ws2_32.WSAStartup"; break;
++                            case 116: ProcName = "ws2_32.WSACleanup"; break;
++                            case 151: ProcName = "ws2_32.__WSAFDIsSet"; break;
+                         }
+                     }
+ 
+diff --git a/SRW/SR_basic.c b/SRW/SR_basic.c
+index 35e1d3b..9c72bd8 100644
+--- a/SRW/SR_basic.c
++++ b/SRW/SR_basic.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+diff --git a/SRW/SR_defs.h b/SRW/SR_defs.h
+index ab2c23c..518be55 100644
+--- a/SRW/SR_defs.h
++++ b/SRW/SR_defs.h
+@@ -44,7 +44,9 @@
+ #define OUT_LLASM 7
+ #define OUT_X64 8
+ 
+-#define OUTPUT_TYPE  OUT_X86
++#ifndef OUTPUT_TYPE
++#define OUTPUT_TYPE OUT_X86
++#endif
+ 
+ #if (OUTPUT_TYPE == OUT_LLASM)
+     #define EMULATE_FPU 1
+diff --git a/SRW/SR_full.c b/SRW/SR_full.c
+index aed2d75..ebbd01d 100644
+--- a/SRW/SR_full.c
++++ b/SRW/SR_full.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+diff --git a/SRW/SR_full_dos.c b/SRW/SR_full_dos.c
+index 8fc8733..cd7b9fa 100644
+--- a/SRW/SR_full_dos.c
++++ b/SRW/SR_full_dos.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+diff --git a/SRW/SR_full_llasm.c b/SRW/SR_full_llasm.c
+index a465f77..5d3c1fc 100644
+--- a/SRW/SR_full_llasm.c
++++ b/SRW/SR_full_llasm.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+@@ -140,6 +140,12 @@ int SR_disassemble_region_llasm(unsigned int Entry, region_data *region)
+ 
+             flags_read = flags_needed[ud_obj.mnemonic];
+             flags_write = flags_modified[ud_obj.mnemonic];
++            if ((flags_read == FL_UNKNOWN ||
++                 flags_write == FL_UNKNOWN) && SR_has_xmm_operand(&ud_obj))
++            {
++                /* SSE ops outside (U)COMIS* leave EFLAGS alone; untranslated ones trap. */
++                flags_read = flags_write = FL_NONE;
++            }
+             if (flags_read == FL_UNKNOWN ||
+                 flags_write == FL_UNKNOWN)
+             {
+@@ -200,6 +206,12 @@ int SR_disassemble_region_llasm(unsigned int Entry, region_data *region)
+                 }
+             }
+ 
++            /* Fixed guest code can enter a block through an indirect edge not
++               represented in this region. Materialize every condition flag
++               instead of dropping writes based on local backwards liveness.
++               ponytail: conservative code size; use inter-block liveness only
++               after all direct and indirect edges are represented. */
++            if (fixed_guest_image) flags_to_write = FL_COND;
+             ret = SR_disassemble_llasm_instruction(Entry, output, flags_to_write, &flags_write, &flags_read, &last_instruction);
+ 
+             if (orig_ebp_dword_aligned)
+@@ -268,6 +280,12 @@ int SR_disassemble_region_llasm(unsigned int Entry, region_data *region)
+         }
+     }
+ 
++    /* These are incoming architectural flags, preserved in the guest CPU by
++       every predecessor in fixed-image mode. Do not accept internal optimizer
++       pseudo-flags as architectural state. */
++    if (fixed_guest_image && !(flags_to_write & ~(FL_ALL | FL_WEAK)))
++        flags_to_write = 0;
++
+     if (flags_to_write)
+     {
+         if (flags_to_write & FL_WEAK)
+@@ -314,4 +332,3 @@ int SR_disassemble_region_llasm(unsigned int Entry, region_data *region)
+ 
+     return 0;
+ }
+-
+diff --git a/SRW/SR_full_llasm_instr.c b/SRW/SR_full_llasm_instr.c
+index 204b86d..0f0def9 100644
+--- a/SRW/SR_full_llasm_instr.c
++++ b/SRW/SR_full_llasm_instr.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+@@ -1724,6 +1724,323 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+ 
+     switch (ud_obj.mnemonic)
+     {
++        case UD_Ipsrlq:
++        case UD_Ipsllq:
++        case UD_Ipsubd:
++        case UD_Iucomisd:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0], *src = &ud_obj.operand[1];
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                unsigned operation = ud_obj.mnemonic == UD_Ipsrlq ? 0 : ud_obj.mnemonic == UD_Ipsllq ? 1 : ud_obj.mnemonic == UD_Ipsubd ? 2 : 3;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_sse2 $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, operation);
++                } else if (operation < 2 && src->type == UD_OP_IMM && src->size == 8) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_sse2 $, %i, %u, 2, %u\n", dst->base - UD_R_XMM0, src->lval.ubyte, operation);
++                } else if (src->type == UD_OP_MEM && (src->size == 128 || (operation == 3 && src->size == 64)) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_sse2 $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, operation);
++                }
++            }
++            break;
++        case UD_Imovq:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0], *src = &ud_obj.operand[1];
++                if (dst->type == UD_OP_REG && dst->base >= UD_R_XMM0 && dst->base <= UD_R_XMM7) {
++                    if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                        OUTPUT_PARAMSTRING("call tc_xmm_move64 $, %i, %i, 0\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0);
++                    } else if (src->type == UD_OP_MEM && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                        SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                        OUTPUT_PARAMSTRING("call tc_xmm_move64 $, %i, %s, 1\n", dst->base - UD_R_XMM0, memadr.madr);
++                    }
++                } else if (dst->type == UD_OP_MEM && src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, dst, fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_move64 $, %i, %s, 2\n", src->base - UD_R_XMM0, memadr.madr);
++                }
++            }
++            break;
++        case UD_Imovd:
++            if (ud_obj.operand[0].type == UD_OP_REG && ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI &&
++                ud_obj.operand[1].type == UD_OP_REG && ud_obj.operand[1].base >= UD_R_XMM0 && ud_obj.operand[1].base <= UD_R_XMM7) {
++                OUTPUT_PARAMSTRING("call tc_xmm_bits32 $, %i, %i\n", ud_obj.operand[0].base - UD_R_EAX, ud_obj.operand[1].base - UD_R_XMM0);
++            }
++            break;
++        case UD_Imovaps:
++        case UD_Imovapd:
++        case UD_Imovntps:
++        case UD_Imovups:
++        case UD_Imovss:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                int dst_xmm = dst->type == UD_OP_REG && dst->base >= UD_R_XMM0 && dst->base <= UD_R_XMM7;
++                int src_xmm = src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7;
++                int alignment = ud_obj.mnemonic == UD_Imovaps || ud_obj.mnemonic == UD_Imovapd || ud_obj.mnemonic == UD_Imovntps ? 16 : 1;
++                int scalar = ud_obj.mnemonic == UD_Imovss;
++                if (dst_xmm && src_xmm)
++                {
++                    OUTPUT_PARAMSTRING("call tc_xmm_copy%s $, %i, %i\n", scalar ? "32" : "", dst->base - UD_R_XMM0, src->base - UD_R_XMM0);
++                }
++                /* Bundled udis86 describes MOVSS memory as O_W (128 bits).
++                   The mnemonic, not that legacy table width, selects 4-byte access. */
++                else if (dst_xmm && src->type == UD_OP_MEM && (src->size == 128 || (scalar && src->size == 32)) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS)
++                {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    if (scalar) {
++                        OUTPUT_PARAMSTRING("call tc_xmm_load32 $, %i, %s\n", dst->base - UD_R_XMM0, memadr.madr);
++                    } else {
++                        OUTPUT_PARAMSTRING("call tc_xmm_load $, %i, %s, %i\n", dst->base - UD_R_XMM0, memadr.madr, alignment);
++                    }
++                }
++                else if (src_xmm && dst->type == UD_OP_MEM && (dst->size == 128 || (ud_obj.mnemonic == UD_Imovntps && dst->size == 0) || (scalar && dst->size == 32)) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS)
++                {
++                    SR_disassemble_get_madr(cOutput, dst, fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    if (scalar) {
++                        OUTPUT_PARAMSTRING("call tc_xmm_store32 $, %i, %s\n", src->base - UD_R_XMM0, memadr.madr);
++                    } else {
++                        OUTPUT_PARAMSTRING("call tc_xmm_store $, %i, %s, %i\n", src->base - UD_R_XMM0, memadr.madr, alignment);
++                    }
++                }
++            }
++            break;
++        case UD_Ixorps:
++        case UD_Iandps:
++        case UD_Iandpd:
++        case UD_Iandnps:
++        case UD_Iorps:
++        case UD_Iorpd:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                /* Keep this operation mapping synchronized with tc_sse.h. */
++                unsigned operation = ud_obj.mnemonic == UD_Ixorps ? 0 : (ud_obj.mnemonic == UD_Iandps || ud_obj.mnemonic == UD_Iandpd) ? 1 : ud_obj.mnemonic == UD_Iandnps ? 2 : 3;
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_logic $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, operation);
++                } else if (src->type == UD_OP_MEM && src->size == 128 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_logic $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, operation);
++                }
++            }
++            break;
++        case UD_Iunpcklps:
++        case UD_Iunpckhps:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned high = ud_obj.mnemonic == UD_Iunpckhps;
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_unpack $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, high);
++                } else if (src->type == UD_OP_MEM && src->size == 128 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_unpack $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, high);
++                }
++            }
++            break;
++        case UD_Imovlhps:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                if (dst->type == UD_OP_REG && dst->base >= UD_R_XMM0 && dst->base <= UD_R_XMM7 &&
++                    src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_movlh $, %i, %i\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0);
++                }
++            }
++            break;
++        case UD_Irsqrtss:
++        case UD_Irsqrtps:
++        case UD_Ircpss:
++        case UD_Ircpps:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned scalar = ud_obj.mnemonic == UD_Irsqrtss || ud_obj.mnemonic == UD_Ircpss;
++                const char *helper = ud_obj.mnemonic == UD_Ircpss || ud_obj.mnemonic == UD_Ircpps ? "rcp" : "rsqrt";
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_%s $, %i, %i, 0, %u\n", helper, dst->base - UD_R_XMM0, src->base - UD_R_XMM0, scalar);
++                } else if (src->type == UD_OP_MEM && (src->size == 128 || (scalar && src->size == 32)) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_%s $, %i, %s, 1, %u\n", helper, dst->base - UD_R_XMM0, memadr.madr, scalar);
++                }
++            }
++            break;
++        case UD_Iaddps:
++        case UD_Iaddss:
++        case UD_Isubps:
++        case UD_Isubss:
++        case UD_Imulps:
++        case UD_Imulss:
++        case UD_Idivps:
++        case UD_Idivss:
++        case UD_Isqrtps:
++        case UD_Isqrtss:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned scalar = ud_obj.mnemonic == UD_Iaddss || ud_obj.mnemonic == UD_Isubss ||
++                    ud_obj.mnemonic == UD_Imulss || ud_obj.mnemonic == UD_Idivss || ud_obj.mnemonic == UD_Isqrtss;
++                /* Operation values are the tc_xmm_arithmetic ABI in tc_sse.h. */
++                unsigned operation =
++                    ud_obj.mnemonic == UD_Iaddps || ud_obj.mnemonic == UD_Iaddss ? 0 :
++                    ud_obj.mnemonic == UD_Isubps || ud_obj.mnemonic == UD_Isubss ? 1 :
++                    ud_obj.mnemonic == UD_Imulps || ud_obj.mnemonic == UD_Imulss ? 2 :
++                    ud_obj.mnemonic == UD_Idivps || ud_obj.mnemonic == UD_Idivss ? 3 : 4;
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_arithmetic $, %i, %i, 0, %u, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, scalar, operation);
++                } else if (src->type == UD_OP_MEM && (src->size == 128 || (scalar && src->size == 32)) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_arithmetic $, %i, %s, 1, %u, %u\n", dst->base - UD_R_XMM0, memadr.madr, scalar, operation);
++                }
++            }
++            break;
++        case UD_Ildmxcsr:
++        case UD_Istmxcsr:
++            {
++                const ud_operand_t *operand = &ud_obj.operand[0];
++                if (operand->type == UD_OP_MEM && operand->size == 32 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, operand, fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_mxcsr_%s $, %s\n", ud_obj.mnemonic == UD_Ildmxcsr ? "load" : "store", memadr.madr);
++                }
++            }
++            break;
++        case UD_Ifcomi:
++        case UD_Ifcomip:
++        case UD_Ifucomi:
++        case UD_Ifucomip:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                if (dst->type == UD_OP_REG && dst->base == UD_R_ST0 &&
++                    src->type == UD_OP_REG && src->base >= UD_R_ST0 && src->base <= UD_R_ST7) {
++                    OUTPUT_PARAMSTRING("call tc_x87_compare $, %i, %u, %u\n", src->base - UD_R_ST0,
++                        ud_obj.mnemonic == UD_Ifucomi || ud_obj.mnemonic == UD_Ifucomip,
++                        ud_obj.mnemonic == UD_Ifcomip || ud_obj.mnemonic == UD_Ifucomip);
++                }
++            }
++            break;
++        case UD_Icomiss:
++        case UD_Iucomiss:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned quiet = ud_obj.mnemonic == UD_Iucomiss;
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_compare $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, quiet);
++                } else if (src->type == UD_OP_MEM && (src->size == 128 || src->size == 32) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_compare $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, quiet);
++                }
++            }
++            break;
++        case UD_Icvtsi2ss:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_EAX && src->base <= UD_R_EDI) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_from_i32 $, %i, %s, 0\n", dst->base - UD_R_XMM0, LLREGSTR(X86322LLREG(src->base)));
++                } else if (src->type == UD_OP_MEM && src->size == 32 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_from_i32 $, %i, %s, 1\n", dst->base - UD_R_XMM0, memadr.madr);
++                }
++            }
++            break;
++        case UD_Icvtss2si:
++        case UD_Icvttss2si:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned truncate = ud_obj.mnemonic == UD_Icvttss2si;
++                if (dst->type != UD_OP_REG || dst->base < UD_R_EAX || dst->base > UD_R_EDI) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_to_i32 $, %i, %i, 0, %u\n", dst->base - UD_R_EAX, src->base - UD_R_XMM0, truncate);
++                } else if (src->type == UD_OP_MEM && (src->size == 128 || src->size == 32) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_to_i32 $, %i, %s, 1, %u\n", dst->base - UD_R_EAX, memadr.madr, truncate);
++                }
++            }
++            break;
++        case UD_Iminps:
++        case UD_Iminss:
++        case UD_Imaxps:
++        case UD_Imaxss:
++        case UD_Icmpps:
++        case UD_Icmpss:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned scalar = ud_obj.mnemonic == UD_Iminss || ud_obj.mnemonic == UD_Imaxss || ud_obj.mnemonic == UD_Icmpss;
++                unsigned compare = ud_obj.mnemonic == UD_Icmpps || ud_obj.mnemonic == UD_Icmpss;
++                unsigned selector = ud_obj.mnemonic == UD_Imaxps || ud_obj.mnemonic == UD_Imaxss;
++                const char *helper = compare ? "tc_xmm_compare_mask" : "tc_xmm_minmax";
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                if (compare) {
++                    const ud_operand_t *predicate = &ud_obj.operand[2];
++                    if (predicate->type != UD_OP_IMM || predicate->size != 8 || predicate->lval.ubyte > 7) break;
++                    selector = predicate->lval.ubyte;
++                }
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call %s $, %i, %i, 0, %u, %u\n", helper, dst->base - UD_R_XMM0, src->base - UD_R_XMM0, scalar, selector);
++                } else if (src->type == UD_OP_MEM && (src->size == 128 || (scalar && src->size == 32)) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call %s $, %i, %s, 1, %u, %u\n", helper, dst->base - UD_R_XMM0, memadr.madr, scalar, selector);
++                }
++            }
++            break;
++        case UD_Iaddsd:
++        case UD_Isubsd:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0], *src = &ud_obj.operand[1];
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7) break;
++                unsigned subtract = ud_obj.mnemonic == UD_Isubsd;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_add64 $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, subtract);
++                } else if (src->type == UD_OP_MEM && (src->size == 64 || src->size == 128) && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_add64 $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, subtract);
++                }
++            }
++            break;
++        case UD_Icmppd:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0], *src = &ud_obj.operand[1], *predicate = &ud_obj.operand[2];
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7 ||
++                    predicate->type != UD_OP_IMM || predicate->size != 8 || predicate->lval.ubyte > 7) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_compare_pd $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, predicate->lval.ubyte);
++                } else if (src->type == UD_OP_MEM && src->size == 128 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_compare_pd $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, predicate->lval.ubyte);
++                }
++            }
++            break;
++        case UD_Imovmskps:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                if (dst->type == UD_OP_REG && dst->base >= UD_R_EAX && dst->base <= UD_R_EDI &&
++                    src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_movemask $, %i, %i\n", dst->base - UD_R_EAX, src->base - UD_R_XMM0);
++                }
++            }
++            break;
++        case UD_Ishufps:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                const ud_operand_t *control = &ud_obj.operand[2];
++                if (dst->type != UD_OP_REG || dst->base < UD_R_XMM0 || dst->base > UD_R_XMM7 || control->type != UD_OP_IMM || control->size != 8) break;
++                if (src->type == UD_OP_REG && src->base >= UD_R_XMM0 && src->base <= UD_R_XMM7) {
++                    OUTPUT_PARAMSTRING("call tc_xmm_shuffle $, %i, %i, 0, %u\n", dst->base - UD_R_XMM0, src->base - UD_R_XMM0, control->lval.ubyte);
++                } else if (src->type == UD_OP_MEM && src->size == 128 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    OUTPUT_PARAMSTRING("call tc_xmm_shuffle $, %i, %s, 1, %u\n", dst->base - UD_R_XMM0, memadr.madr, control->lval.ubyte);
++                }
++            }
++            break;
+         case UD_Iadc:
+         case UD_Isbb:
+             {
+@@ -2409,6 +2726,24 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                                 OUTPUT_STRING("and tmp1, tmp1, CF\n");
+                                 OUTPUT_STRING("or eflags, eflags, tmp1\n");
+                             }
++                            else if (ud_obj.operand[1].type == UD_OP_REG &&
++                                     ud_obj.operand[1].base >= UD_R_EAX && ud_obj.operand[1].base <= UD_R_EDI)
++                            {
++                                SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                                memadr.align = 1;
++
++                                OUTPUT_PARAMSTRING("ashr tmp1, %s, 3\n", X86REGSTR(ud_obj.operand[1].base));
++                                OUTPUT_STRING("add tmpadr, tmpadr, tmp1\n");
++
++                                SR_disassemble_read_mem_byte(cOutput, &memadr, LR_TMP1, READ8TO32ZERO);
++
++                                SR_disassemble_change_flags(pOutput, FL_CARRY, 0, 0);
++
++                                OUTPUT_PARAMSTRING("and tmp2, %s, 7\n", X86REGSTR(ud_obj.operand[1].base));
++                                OUTPUT_STRING("lshr tmp1, tmp1, tmp2\n");
++                                OUTPUT_STRING("and tmp1, tmp1, CF\n");
++                                OUTPUT_STRING("or eflags, eflags, tmp1\n");
++                            }
+                         }
+                         else if (ud_obj.operand[0].size == 16)
+                         {
+@@ -2473,6 +2808,34 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                         }
+                     }
+                 }
++                else if (ud_obj.operand[0].type == UD_OP_MEM &&
++                         ud_obj.operand[0].size == 32 &&
++                         ud_obj.operand[1].type == UD_OP_REG &&
++                         ud_obj.operand[1].base >= UD_R_EAX && ud_obj.operand[1].base <= UD_R_EDI)
++                {
++                    /* Bit string: signed offset selects byte offset>>3, bit offset&7 (CRT strpbrk/strspn bitmaps). */
++                    SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                    memadr.align = 1;
++
++                    OUTPUT_PARAMSTRING("ashr tmp1, %s, 3\n", X86REGSTR(ud_obj.operand[1].base));
++                    OUTPUT_STRING("add tmpadr, tmpadr, tmp1\n");
++
++                    SR_disassemble_read_mem_byte(cOutput, &memadr, LR_TMP1, READ8TO32ZERO);
++
++                    OUTPUT_PARAMSTRING("and tmp2, %s, 7\n", X86REGSTR(ud_obj.operand[1].base));
++                    if (flags_to_write & FL_CARRY)
++                    {
++                        SR_disassemble_change_flags(pOutput, FL_CARRY, 0, 0);
++                        OUTPUT_STRING("lshr tmp3, tmp1, tmp2\n");
++                        OUTPUT_STRING("and tmp3, tmp3, CF\n");
++                        OUTPUT_STRING("or eflags, eflags, tmp3\n");
++                    }
++                    OUTPUT_STRING("mov tmp3, 1\n");
++                    OUTPUT_STRING("shl tmp3, tmp3, tmp2\n");
++                    OUTPUT_STRING("or tmp1, tmp1, tmp3\n");
++
++                    SR_disassemble_write_mem_byte(cOutput, &memadr, LR_TMP1, WRITE8LOW);
++                }
+             }
+             break;
+         case UD_Icall:
+@@ -2504,7 +2867,9 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     {
+                         if ( SR_disassemble_find_noret(address) )
+                         {
+-                            strcpy(cLabel, "0 ; no return");
++                            if (fixed_guest_image)
++                                sprintf(cLabel, "0x%x ; no return", (unsigned int)(section[Entry].start + cur_ofs + decoded_length));
++                            else strcpy(cLabel, "0 ; no return");
+                             last_instruction = -2;
+                         }
+ 
+@@ -2636,6 +3001,9 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 SR_disassemble_change_flags(cOutput, FL_CARRY, 0, 0);
+             }
+             break;
++        case UD_Icpuid:
++            OUTPUT_STRING("call tc_cpuid $\n");
++            break;
+         case UD_Icld:
+             {
+                 /* clear direction flag */
+@@ -2658,6 +3026,64 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+ 
+             }
+             break;
++        case UD_Icmovo:
++        case UD_Icmovno:
++        case UD_Icmovb:
++        case UD_Icmovae:
++        case UD_Icmovz:
++        case UD_Icmovnz:
++        case UD_Icmovbe:
++        case UD_Icmova:
++        case UD_Icmovs:
++        case UD_Icmovns:
++        case UD_Icmovp:
++        case UD_Icmovnp:
++        case UD_Icmovl:
++        case UD_Icmovge:
++        case UD_Icmovle:
++        case UD_Icmovg:
++            {
++                const ud_operand_t *dst = &ud_obj.operand[0];
++                const ud_operand_t *src = &ud_obj.operand[1];
++                unsigned condition = ud_obj.mnemonic - UD_Icmovo;
++                if (dst->type != UD_OP_REG || (dst->size != 16 && dst->size != 32)) break;
++                if ((dst->size == 32 && (dst->base < UD_R_EAX || dst->base > UD_R_EDI)) ||
++                    (dst->size == 16 && (dst->base < UD_R_AX || dst->base > UD_R_DI))) break;
++                /* CMOV always reads a memory source, even when not selected. */
++                if (src->type == UD_OP_MEM && src->size == dst->size &&
++                    ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS) {
++                    SR_disassemble_get_madr(cOutput, src, fixup[1], extrn[1], UD_NONE, MADR_READ, ZERO_EXTEND, &memadr);
++                    if (dst->size == 32) SR_disassemble_read_mem_word(cOutput, &memadr, LR_TMP4);
++                    else SR_disassemble_read_mem_halfword(cOutput, &memadr, LR_TMP4, READ16TO32ZERO);
++                } else if (src->type == UD_OP_REG && src->size == dst->size &&
++                    ((src->size == 32 && src->base >= UD_R_EAX && src->base <= UD_R_EDI) ||
++                     (src->size == 16 && src->base >= UD_R_AX && src->base <= UD_R_DI))) {
++                    OUTPUT_PARAMSTRING("mov tmp4, %s\n", X862LLSTR(src->base));
++                } else break;
++                if (condition < 12) {
++                    static const char *masks[] = {"OF", "CF", "ZF", "CF | ZF", "SF", "PF"};
++                    OUTPUT_PARAMSTRING("and tmp1, eflags, %s\n", masks[condition / 2]);
++                } else {
++                    OUTPUT_STRING("lshr tmp1, eflags, OF_SHIFT - SF_SHIFT\n");
++                    OUTPUT_STRING("xor tmp1, tmp1, eflags\n");
++                    OUTPUT_STRING("and tmp1, tmp1, SF\n");
++                    if (condition >= 14) {
++                        OUTPUT_STRING("and tmp2, eflags, ZF\n");
++                        OUTPUT_STRING("or tmp1, tmp1, tmp2\n");
++                    }
++                }
++                if (condition & 1) {
++                    OUTPUT_PARAMSTRING("cmovz tmp1, tmp4, tmp4, %s\n", X862LLSTR(dst->base));
++                } else {
++                    OUTPUT_PARAMSTRING("cmovz tmp1, tmp4, %s, tmp4\n", X862LLSTR(dst->base));
++                }
++                if (dst->size == 32) {
++                    OUTPUT_PARAMSTRING("mov %s, tmp4\n", X862LLSTR(dst->base));
++                } else {
++                    OUTPUT_PARAMSTRING("ins16 %s, %s, tmp4\n", X862LLSTR(dst->base), X862LLSTR(dst->base));
++                }
++            }
++            break;
+         case UD_Icmp:
+             {
+                 /* OS,SF,ZF,AF,PF,CF - modified */
+@@ -2942,6 +3368,17 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+ 
+             }
+             break;
++        case UD_Icmpsd:
++            {
++                /* String CMPSD only; the SSE2 form has explicit operands. */
++                if (ud_obj.operand[0].type == UD_NONE &&
++                    ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS &&
++                    !ud_obj.pfx_adr) {
++                    OUTPUT_PARAMSTRING("call tc_cmps32 $, %u\n",
++                        ud_obj.pfx_repne ? 2u : (ud_obj.pfx_rep || ud_obj.pfx_repe) ? 1u : 0u);
++                }
++            }
++            break;
+         case UD_Icmpsb:
+             {
+                 /* OS,SF,ZF,AF,PF,CF - modified */
+@@ -4153,6 +4590,7 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 }
+             }
+             break;
++        case UD_Ijecxz:
+         case UD_Iloop:
+         case UD_Iloope:
+         //case UD_Iloopn:
+@@ -4199,9 +4637,14 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     //OUTPUT_STRING("ACTION_LOOP_FORWARD\n");
+                 }
+ 
+-                OUTPUT_STRING("sub ecx, ecx, 1\n");
++                if (ud_obj.mnemonic != UD_Ijecxz)
++                    OUTPUT_STRING("sub ecx, ecx, 1\n");
+ 
+-                if ((ud_obj.mnemonic == UD_Iloope) //|| (ud_obj.mnemonic == UD_Iloopz)
++                if (ud_obj.mnemonic == UD_Ijecxz)
++                {
++                    OUTPUT_PARAMSTRING("ctcallz ecx, %s\n", cAddress);
++                }
++                else if ((ud_obj.mnemonic == UD_Iloope) //|| (ud_obj.mnemonic == UD_Iloopz)
+                    )
+                 {
+                     OUTPUT_STRING("and tmp1, eflags, ZF\n");
+@@ -4264,7 +4707,7 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+ 
+                 if (ud_obj.operand[0].type == UD_OP_REG)
+                 {
+-                    if (ud_obj.mnemonic == UD_Imov &&
++                    if (ud_obj.mnemonic == UD_Imov && !fixed_guest_image &&
+                         ud_obj.operand[1].type == UD_OP_MEM &&
+                         ud_obj.operand[1].base == UD_NONE &&
+                         ud_obj.operand[1].index == UD_NONE &&
+@@ -4315,7 +4758,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     {
+                         // mov reg, fs:[const]
+ 
+-                        OUTPUT_PARAMSTRING("call x86_read_fs_dword 0x%x\n", ud_obj.operand[1].lval.udword);
++                        if (fixed_guest_image) {
++                            OUTPUT_PARAMSTRING("call tc_read_fs $, 0x%x\n", ud_obj.operand[1].lval.udword);
++                        } else {
++                            OUTPUT_PARAMSTRING("call x86_read_fs_dword 0x%x\n", ud_obj.operand[1].lval.udword);
++                        }
+                         OUTPUT_PARAMSTRING("mov %s, tmp0\n", X86REGSTR(ud_obj.operand[0].base));
+                     }
+                     else if (ud_obj.mnemonic == UD_Imov &&
+@@ -4330,7 +4777,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     {
+                         // mov reg, fs:[reg]
+ 
+-                        OUTPUT_PARAMSTRING("call x86_read_fs_dword %s\n", X86REGSTR(ud_obj.operand[1].base));
++                        if (fixed_guest_image) {
++                            OUTPUT_PARAMSTRING("call tc_read_fs $, %s\n", X86REGSTR(ud_obj.operand[1].base));
++                        } else {
++                            OUTPUT_PARAMSTRING("call x86_read_fs_dword %s\n", X86REGSTR(ud_obj.operand[1].base));
++                        }
+                         OUTPUT_PARAMSTRING("mov %s, tmp0\n", X86REGSTR(ud_obj.operand[0].base));
+                     }
+                     else if (ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI)
+@@ -4473,7 +4924,7 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 }
+                 else if (ud_obj.operand[0].type == UD_OP_MEM)
+                 {
+-                    if (ud_obj.mnemonic == UD_Imov &&
++                    if (ud_obj.mnemonic == UD_Imov && !fixed_guest_image &&
+                         ud_obj.operand[0].base == UD_NONE &&
+                         ud_obj.operand[0].index == UD_NONE &&
+                         fixup[0] == NULL &&
+@@ -4531,7 +4982,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     {
+                         // mov fs:[const], reg
+ 
+-                        OUTPUT_PARAMSTRING("call x86_write_fs_dword 0x%x, %s\n", ud_obj.operand[0].lval.udword, X86REGSTR(ud_obj.operand[1].base));
++                        if (fixed_guest_image) {
++                            OUTPUT_PARAMSTRING("call tc_write_fs $, 0x%x, %s\n", ud_obj.operand[0].lval.udword, X86REGSTR(ud_obj.operand[1].base));
++                        } else {
++                            OUTPUT_PARAMSTRING("call x86_write_fs_dword 0x%x, %s\n", ud_obj.operand[0].lval.udword, X86REGSTR(ud_obj.operand[1].base));
++                        }
+                     }
+                     else if (ud_obj.mnemonic == UD_Imov &&
+                         ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI &&
+@@ -4546,7 +5001,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     {
+                         // mov fs:[reg], reg
+ 
+-                        OUTPUT_PARAMSTRING("call x86_write_fs_dword %s, %s\n", X86REGSTR(ud_obj.operand[0].base), X86REGSTR(ud_obj.operand[1].base));
++                        if (fixed_guest_image) {
++                            OUTPUT_PARAMSTRING("call tc_write_fs $, %s, %s\n", X86REGSTR(ud_obj.operand[0].base), X86REGSTR(ud_obj.operand[1].base));
++                        } else {
++                            OUTPUT_PARAMSTRING("call x86_write_fs_dword %s, %s\n", X86REGSTR(ud_obj.operand[0].base), X86REGSTR(ud_obj.operand[1].base));
++                        }
+                     }
+                     else if (ud_obj.operand[0].size == 32)
+                     {
+@@ -5057,7 +5516,16 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                 }
+             }
+             break;
++        case UD_Isfence:
++            {
++                OUTPUT_STRING("call tc_store_fence\n");
++            }
++            break;
+         case UD_Inop:
++        case UD_Iprefetchnta:
++        case UD_Iprefetcht0:
++        case UD_Iprefetcht1:
++        case UD_Iprefetcht2:
+             {
+                 /* no flags affected */
+ 
+@@ -5173,7 +5641,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                         // pop dword fs:[const]
+ 
+                         OUTPUT_STRING("POP tmp1\n");
+-                        OUTPUT_PARAMSTRING("call x86_write_fs_dword 0x%x, tmp1\n", ud_obj.operand[0].lval.udword);
++                        if (fixed_guest_image) {
++                            OUTPUT_PARAMSTRING("call tc_write_fs $, 0x%x, tmp1\n", ud_obj.operand[0].lval.udword);
++                        } else {
++                            OUTPUT_PARAMSTRING("call x86_write_fs_dword 0x%x, tmp1\n", ud_obj.operand[0].lval.udword);
++                        }
+                     }
+                     else if (ud_obj.operand[0].size == 32)
+                     {
+@@ -5261,7 +5733,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     {
+                         // push dword fs:[const]
+ 
+-                        OUTPUT_PARAMSTRING("call x86_read_fs_dword 0x%x\n", ud_obj.operand[0].lval.udword);
++                        if (fixed_guest_image) {
++                            OUTPUT_PARAMSTRING("call tc_read_fs $, 0x%x\n", ud_obj.operand[0].lval.udword);
++                        } else {
++                            OUTPUT_PARAMSTRING("call x86_read_fs_dword 0x%x\n", ud_obj.operand[0].lval.udword);
++                        }
+                         OUTPUT_STRING("PUSH tmp0\n");
+                     }
+                     else if (ud_obj.operand[0].size == 32)
+@@ -5972,6 +6448,31 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+             {
+                 /* SF,ZF,PF,CF - modified, AF - undefined, OF - modified for 1-bit shifts, else undefined */
+ 
++                if (fixed_guest_image && ud_obj.operand[0].type == UD_OP_REG &&
++                    ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI &&
++                    ud_obj.operand[1].type == UD_OP_REG && ud_obj.operand[1].base == UD_R_CL) {
++                    OUTPUT_PARAMSTRING("call tc_shift32 $, %i, %s, ecx, %u\n",
++                        ud_obj.operand[0].base - UD_R_EAX, X86REGSTR(ud_obj.operand[0].base),
++                        ud_obj.mnemonic == UD_Ishl ? 0u : ud_obj.mnemonic == UD_Ishr ? 1u : 2u);
++                    break;
++                }
++
++                if (fixed_guest_image && ud_obj.operand[0].type == UD_OP_REG &&
++                    ud_obj.operand[1].type == UD_OP_REG && ud_obj.operand[1].base == UD_R_CL) {
++                    enum ud_type reg = ud_obj.operand[0].base;
++                    int destination = -1, width = 8, offset = 0;
++                    if (reg >= UD_R_AX && reg <= UD_R_DI) { destination = reg - UD_R_AX; width = 16; }
++                    else if (reg >= UD_R_AL && reg <= UD_R_BL) destination = reg - UD_R_AL;
++                    else if (reg >= UD_R_AH && reg <= UD_R_BH) { destination = reg - UD_R_AH; offset = 8; }
++                    if (destination >= 0) {
++                        OUTPUT_PARAMSTRING("call tc_shift_part $, %i, %s, ecx, %u, %i, %i\n",
++                            destination, X862LLSTR(reg),
++                            ud_obj.mnemonic == UD_Ishl ? 0u : ud_obj.mnemonic == UD_Ishr ? 1u : 2u,
++                            width, offset);
++                        break;
++                    }
++                }
++
+                 if (ud_obj.operand[0].type == UD_OP_REG)
+                 {
+                     if (ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI)
+@@ -6502,6 +7003,22 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+             {
+                 /* SF,ZF,PF,CF - modified, AF - undefined, OF - modified for 1-bit shifts, else undefined */
+ 
++                if (fixed_guest_image && ud_obj.operand[0].type == UD_OP_REG &&
++                    ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI &&
++                    ud_obj.operand[1].type == UD_OP_REG &&
++                    ud_obj.operand[1].base >= UD_R_EAX && ud_obj.operand[1].base <= UD_R_EDI &&
++                    ((ud_obj.operand[2].type == UD_OP_REG && ud_obj.operand[2].base == UD_R_CL) ||
++                     ud_obj.operand[2].type == UD_OP_IMM)) {
++                    char count[16];
++                    if (ud_obj.operand[2].type == UD_OP_IMM)
++                        snprintf(count, sizeof(count), "%u", (unsigned)ud_obj.operand[2].lval.ubyte);
++                    else strcpy(count, "ecx");
++                    OUTPUT_PARAMSTRING("call tc_double_shift32 $, %i, %s, %s, %s, %u\n",
++                        ud_obj.operand[0].base - UD_R_EAX, X86REGSTR(ud_obj.operand[0].base),
++                        X86REGSTR(ud_obj.operand[1].base), count, ud_obj.mnemonic == UD_Ishrd ? 1u : 0u);
++                    break;
++                }
++
+                 if (ud_obj.operand[0].type == UD_OP_REG)
+                 {
+                     if (ud_obj.operand[0].base >= UD_R_EAX && ud_obj.operand[0].base <= UD_R_EDI)
+@@ -6710,6 +7227,11 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                                     flags_write = flags_to_write;
+                                 }
+                             }
++                            else if (ud_obj.operand[1].base >= UD_R_AH && ud_obj.operand[1].base <= UD_R_BH)
++                            {
++                                if (SR_llasm_helper_and_8l(ud_obj.mnemonic, LR_TMP1, X868L2LLREG(ud_obj.operand[0].base), X868H2LLREG(ud_obj.operand[1].base), 8))
++                                    flags_write = flags_to_write;
++                            }
+                         }
+                         else if (ud_obj.operand[1].type == UD_OP_MEM)
+                         {
+@@ -6732,6 +7254,9 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                         {
+                             if (ud_obj.operand[1].base >= UD_R_AL && ud_obj.operand[1].base <= UD_R_BL)
+                             {
++                                /* TEST is commutative; reuse low/high-byte lowering. */
++                                if (SR_llasm_helper_and_8l(ud_obj.mnemonic, LR_TMP1, X868L2LLREG(ud_obj.operand[1].base), X868H2LLREG(ud_obj.operand[0].base), 8))
++                                    flags_write = flags_to_write;
+                             }
+                             else if (ud_obj.operand[1].base >= UD_R_AH && ud_obj.operand[1].base <= UD_R_BH)
+                             {
+@@ -7113,6 +7638,60 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+ 
+             }
+             break;
++        case UD_Ifrndint:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_round $\n");
++            }
++            break;
++        case UD_Iffree:
++        case UD_Ifincstp:
++        case UD_Ifdecstp:
++        case UD_Ifldl2e:
++        case UD_Ifldl2t:
++        case UD_Ifxam:
++        case UD_Iftst:
++        case UD_Ifprem:
++        case UD_Ifprem1:
++        case UD_Ifyl2xp1:
++            {
++                /* Remaining x87 operations share one runtime helper (tc_x87_misc). */
++                static const enum ud_mnemonic_code order[] = {UD_Iffree, UD_Ifincstp, UD_Ifdecstp, UD_Ifldl2e, UD_Ifldl2t, UD_Ifxam, UD_Iftst, UD_Ifprem, UD_Ifprem1, UD_Ifyl2xp1};
++                unsigned op = 0;
++                while (order[op] != ud_obj.mnemonic) op++;
++                OUTPUT_PARAMSTRING("call tc_x87_misc $, %u, %u\n", op,
++                    ud_obj.operand[0].type == UD_OP_REG ? (unsigned)X87REGNUM(ud_obj.operand[0].base) : 0u);
++            }
++            break;
++        case UD_If2xm1:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_exp2m1 $\n");
++            }
++            break;
++        case UD_Ifscale:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_scale $\n");
++            }
++            break;
++        case UD_Ifclex:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_clear $\n");
++            }
++            break;
++        case UD_Ifldpi:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_pi $\n");
++            }
++            break;
++        case UD_Ifpatan:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_atan $\n");
++            }
++            break;
++        case UD_Ifsincos:
++            if (ud_obj.operand[0].type == UD_NONE) {
++                OUTPUT_STRING("call tc_x87_sincos $\n");
++            }
++            break;
+         case UD_Ifabs:
+         case UD_Ifchs:
+         case UD_Ifcompp:
+@@ -7283,6 +7862,10 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                                     {
+                                         OUTPUT_PARAMSTRING("%s_ST %i\n", instr, X87REGNUM(ud_obj.operand[1].base));
+                                     }
++                                    else if (ud_obj.operand[1].base == UD_R_ST0 && ud_obj.mnemonic == UD_Ifsubr)
++                                    {
++                                        OUTPUT_PARAMSTRING("FSUBR_TO_ST %i\n", X87REGNUM(ud_obj.operand[0].base));
++                                    }
+                                 }
+                             }
+                         }
+@@ -7532,7 +8115,12 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+                     }
+                     else if (ud_obj.operand[0].type == UD_OP_MEM)
+                     {
+-                        if (ud_obj.operand[0].size == 64)
++                        if (ud_obj.operand[0].size == 80 && ud_obj.pfx_seg != UD_R_FS && ud_obj.pfx_seg != UD_R_GS)
++                        {
++                            SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_REG, ZERO_EXTEND, &memadr);
++                            OUTPUT_PARAMSTRING("call tc_x87_load80 $, %s\n", memadr.madr);
++                        }
++                        else if (ud_obj.operand[0].size == 64)
+                         {
+                             SR_disassemble_get_madr(cOutput, &(ud_obj.operand[0]), fixup[0], extrn[0], UD_NONE, MADR_READ, ZERO_EXTEND, &memadr);
+ 
+@@ -7747,11 +8335,18 @@ int SR_disassemble_llasm_instruction(unsigned int Entry, output_data *output, ui
+ 
+ #endif
+         default:
++            if (SR_has_xmm_operand(&ud_obj)) break;
+             fprintf(stderr, "Error: unknown instruction - %i - %i - %s\n", Entry, (unsigned int)cur_ofs, output->str);
+ 
+             return 5;
+     }
+ 
++    if (cOutput[0] == 0 && SR_has_xmm_operand(&ud_obj))
++    {
++        fprintf(stderr, "Warning: untranslated SSE instruction trapped - 0x%x - %s\n", (unsigned int)(section[Entry].start + cur_ofs), output->str);
++        OUTPUT_PARAMSTRING("call tc_unsupported_instruction $, 0x%x\n", (unsigned int)(section[Entry].start + cur_ofs));
++    }
++
+     if (cOutput[0] == 0)
+     {
+             fprintf(stderr, "Error: llasm instruction error - %i - %i - %s\n", Entry, (unsigned int)cur_ofs, output->str);
+diff --git a/SRW/SR_full_win32.c b/SRW/SR_full_win32.c
+index 4075221..93619c4 100644
+--- a/SRW/SR_full_win32.c
++++ b/SRW/SR_full_win32.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+@@ -611,6 +611,7 @@ int SR_disassemble_offset_win32(unsigned int Entry, uint_fast32_t offset)
+                 {
+                     if (!SR_disassemble_change_cjump_iflags(Entry, offset, prev_cjump_length, ud_obj.mnemonic))
+                     {
++                        fprintf(stderr, "Error: consecutive conditional jump flags - %i - 0x%x\n", Entry, (unsigned int)(section[Entry].start + offset));
+                         return 3;
+                     }
+                 }
+diff --git a/SRW/SR_full_x64.c b/SRW/SR_full_x64.c
+index 3034bf0..2fe7d31 100644
+--- a/SRW/SR_full_x64.c
++++ b/SRW/SR_full_x64.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+diff --git a/SRW/SR_full_x64_instr.c b/SRW/SR_full_x64_instr.c
+index 5df999a..844a0c2 100644
+--- a/SRW/SR_full_x64_instr.c
++++ b/SRW/SR_full_x64_instr.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "SR_defs.h"
+ #include "SR_vars.h"
+diff --git a/SRW/SR_main.c b/SRW/SR_main.c
+index 365f694..683fef6 100644
+--- a/SRW/SR_main.c
++++ b/SRW/SR_main.c
+@@ -23,7 +23,7 @@
+  */
+ 
+ #include <stdio.h>
+-#include <malloc.h>
++#include <stdlib.h>
+ #include <time.h>
+ #include <string.h>
+ 
+@@ -253,6 +253,7 @@ static void initialize_values(void)
+ 	list_data_to_code_fixups = 0;
+ 	data_to_code_fixups_name = NULL;
+ 	add_tracing_to_code = 0;
++	fixed_guest_image = 0;
+ 
+ 	esp_dword_aligned = 0;
+ 	ebp_dword_aligned = 0;
+@@ -318,6 +319,15 @@ int main (int argc, char *argv[])
+ 			{
+ 				add_tracing_to_code = 1;
+ 			}
++			else if (strcasecmp(*argv, "--fixed-guest-image") == 0)
++			{
++#if (OUTPUT_TYPE == OUT_LLASM)
++				fixed_guest_image = 1;
++#else
++				fprintf(stderr, "Fixed guest image requires LLasm output\n");
++				return 1;
++#endif
++			}
+ 		}
+ 		else
+ 		{
+diff --git a/SRW/SR_output.c b/SRW/SR_output.c
+index cf614fc..34820a3 100644
+--- a/SRW/SR_output.c
++++ b/SRW/SR_output.c
+@@ -538,6 +538,8 @@ int SR_write_output(const char *fname)
+ 
+ #if (OUTPUT_TYPE == OUT_LLASM)
+     fprintf(EF.fout, "%s\n", "include llasm.llinc");
++    if (fixed_guest_image)
++        fprintf(EF.fout, "; Fixed guest image: requires -m64 -ptrofs -guest-code-map and original guest image data.\n");
+     fprintf(EF.fout, "%s\n", "include extern.llinc");
+     fprintf(EF.fout, "%s\n", "include macros.llinc");
+ #else
+@@ -869,4 +871,3 @@ int SR_write_output(const char *fname)
+     return 0;
+ #endif
+ }
+-
+diff --git a/SRW/SR_vars.h b/SRW/SR_vars.h
+index 3f090c5..c962bcf 100644
+--- a/SRW/SR_vars.h
++++ b/SRW/SR_vars.h
+@@ -55,6 +55,7 @@ EXTERNAL_VARIABLE int list_data_to_code_fixups;
+ EXTERNAL_VARIABLE char *data_to_code_fixups_name;
+ 
+ EXTERNAL_VARIABLE int add_tracing_to_code;
++EXTERNAL_VARIABLE int fixed_guest_image;
+ 
+ EXTERNAL_VARIABLE int esp_dword_aligned;
+ EXTERNAL_VARIABLE int ebp_dword_aligned;
+diff --git a/SRW/udis86_dep.c b/SRW/udis86_dep.c
+index e95efa7..b75fe8d 100644
+--- a/SRW/udis86_dep.c
++++ b/SRW/udis86_dep.c
+@@ -58,11 +58,30 @@ int init_udis86_dep(void)
+ 	SET_FLAGS(UD_Icbw, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Icdq, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Iclc, FL_NONE, FL_CARRY);
++	SET_FLAGS(UD_Icpuid, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Icld, FL_NONE, FL_DIRECTION);
+ 	SET_FLAGS(UD_Icli, FL_NONE, FL_INTERRUPT);
+ 	SET_FLAGS(UD_Icmc, FL_CARRY, FL_CARRY);
++	SET_FLAGS(UD_Icmovo, FL_OVERFLOW, FL_NONE);
++	SET_FLAGS(UD_Icmovno, FL_OVERFLOW, FL_NONE);
++	SET_FLAGS(UD_Icmovb, FL_CARRY, FL_NONE);
++	SET_FLAGS(UD_Icmovae, FL_CARRY, FL_NONE);
++	SET_FLAGS(UD_Icmovz, FL_ZERO, FL_NONE);
++	SET_FLAGS(UD_Icmovnz, FL_ZERO, FL_NONE);
++	SET_FLAGS(UD_Icmovbe, FL_ZERO | FL_CARRY, FL_NONE);
++	SET_FLAGS(UD_Icmova, FL_ZERO | FL_CARRY, FL_NONE);
++	SET_FLAGS(UD_Icmovs, FL_SIGN, FL_NONE);
++	SET_FLAGS(UD_Icmovns, FL_SIGN, FL_NONE);
++	SET_FLAGS(UD_Icmovp, FL_PARITY, FL_NONE);
++	SET_FLAGS(UD_Icmovnp, FL_PARITY, FL_NONE);
++	SET_FLAGS(UD_Icmovl, FL_SIGN | FL_OVERFLOW, FL_NONE);
++	SET_FLAGS(UD_Icmovge, FL_SIGN | FL_OVERFLOW, FL_NONE);
++	SET_FLAGS(UD_Icmovle, FL_ZERO | FL_SIGN | FL_OVERFLOW, FL_NONE);
++	SET_FLAGS(UD_Icmovg, FL_ZERO | FL_SIGN | FL_OVERFLOW, FL_NONE);
++
+ 	SET_FLAGS(UD_Icmp, FL_NONE, FL_COND_SUB);
+ 	SET_FLAGS(UD_Icmpsb, /* FL_DIRECTION */ FL_NONE, FL_COND_SUB);
++	SET_FLAGS(UD_Icmpsd, FL_NONE, FL_COND_SUB);
+ 	SET_FLAGS(UD_Icwd, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Icwde, FL_NONE, FL_NONE);
+ 
+@@ -81,6 +100,10 @@ int init_udis86_dep(void)
+ 	SET_FLAGS(UD_Ifcom, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifcomp, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifcompp, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifcomi, FL_NONE, FL_COND);
++	SET_FLAGS(UD_Ifcomip, FL_NONE, FL_COND);
++	SET_FLAGS(UD_Ifucomi, FL_NONE, FL_COND);
++	SET_FLAGS(UD_Ifucomip, FL_NONE, FL_COND);
+ 	SET_FLAGS(UD_Ifcos, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifdiv, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifdivp, FL_NONE, FL_NONE);
+@@ -110,6 +133,23 @@ int init_udis86_dep(void)
+ 	SET_FLAGS(UD_Ifptan, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifrstor, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifsin, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifsincos, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifpatan, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifclex, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifrndint, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_If2xm1, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iffree, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifincstp, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifdecstp, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifldl2e, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifldl2t, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifxam, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iftst, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifprem, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifprem1, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifyl2xp1, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifscale, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ifldpi, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifsqrt, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifst, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Ifstp, FL_NONE, FL_NONE);
+@@ -175,6 +215,59 @@ int init_udis86_dep(void)
+ 
+ 	/* M */
+ 	SET_FLAGS(UD_Imov, FL_NONE, FL_SPECIFIC);
++	SET_FLAGS(UD_Imovaps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovapd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iandpd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ipsrlq, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ipsllq, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ipsubd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovq, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iucomisd, FL_NONE, FL_COND);
++	SET_FLAGS(UD_Imovntps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Isfence, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovups, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ishufps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ixorps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iandps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iandnps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iorps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iorpd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iunpcklps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iunpckhps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovlhps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iaddps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iaddss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Isubps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Isubss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imulps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imulss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Idivps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Idivss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Isqrtps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Isqrtss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Irsqrtss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Irsqrtps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ircpps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ircpss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Ildmxcsr, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Istmxcsr, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icomiss, FL_NONE, FL_COND);
++	SET_FLAGS(UD_Iucomiss, FL_NONE, FL_COND);
++	SET_FLAGS(UD_Icvtsi2ss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icvtss2si, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icvttss2si, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iminps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iminss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imaxps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imaxss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icmpps, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icmppd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iaddsd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Isubsd, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Icmpss, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Imovmskps, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Imovsb, /* FL_DIRECTION */ FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Imovsd, /* FL_DIRECTION */ FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Imovsw, /* FL_DIRECTION */ FL_NONE, FL_NONE);
+@@ -185,6 +278,10 @@ int init_udis86_dep(void)
+ 	/* N */
+ 	SET_FLAGS(UD_Ineg, FL_NONE, FL_COND_SUB);
+ 	SET_FLAGS(UD_Inop, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iprefetchnta, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iprefetcht0, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iprefetcht1, FL_NONE, FL_NONE);
++	SET_FLAGS(UD_Iprefetcht2, FL_NONE, FL_NONE);
+ 	SET_FLAGS(UD_Inot, FL_NONE, FL_NONE);
+ 
+ 	/* O */
+diff --git a/SRW/udis86_dep.h b/SRW/udis86_dep.h
+index 0c9b519..97ec372 100644
+--- a/SRW/udis86_dep.h
++++ b/SRW/udis86_dep.h
+@@ -30,6 +30,17 @@
+ 
+ #define MAX_MNEMONICS (UD_MAX_MNEMONIC_CODE)
+ 
++/* SSE/MMX instructions (CPUID reports neither MMX nor SSE2) without a translation become runtime traps (see tc_unsupported_instruction). */
++static inline int SR_has_xmm_operand(const ud_t *u)
++{
++	int i;
++	if (u->mnemonic == UD_Iemms || u->mnemonic == UD_Ifemms) return 1;
++	for (i = 0; i < 3; i++)
++		if (u->operand[i].type == UD_OP_REG && ((u->operand[i].base >= UD_R_XMM0 && u->operand[i].base <= UD_R_XMM15) ||
++		    (u->operand[i].base >= UD_R_MM0 && u->operand[i].base <= UD_R_MM7))) return 1;
++	return 0;
++}
++
+ #if defined(DEFINE_VARIABLES)
+ 	#define EXTERNAL_VARIABLE
+ #else
+diff --git a/llasm/llasm.d b/llasm/llasm.d
+index 6d0b790..2d9ca29 100644
+--- a/llasm/llasm.d
++++ b/llasm/llasm.d
+@@ -121,6 +121,8 @@ string[] include_directories;
+ bool output_preprocessed_file, input_reading_proc, input_reading_dataseg, position_independent_code, old_bitcode, no_tail_calls, pointer_size_64, pointers_with_offset, inline_idiv_instr, inline_float_instr, inline_float2_instr;
+ uint global_optimization_level, procedure_optimization_level;
+ string[string] function_names;
++string guest_code_map_file;
++uint[string] guest_code_addresses;
+ 
+ int file_input_level;
+ file_input_struct[] file_input_stack;
+@@ -1414,6 +1416,13 @@ string get_int32_to_ptr(string value, string ptrtype = "i8", bool nullable_point
+ 
+ string get_addr_to_int32(string value, string ptrtype = "i8", bool nullable_pointer = false)
+ {
++    if (guest_code_map_file != "" && ptrtype == "void(%_cpu*)")
++    {
++        if (value == "@__return_procedure") return "4294967295";
++        auto address = value[1..$] in guest_code_addresses;
++        if (address is null) throw new Exception("Missing guest code address: " ~ value);
++        return to!string(*address);
++    }
+     if (pointers_with_offset)
+     {
+         string ptrofs = get_reg64_value("ptrofs");
+@@ -2981,7 +2990,15 @@ bool process_proc_body(string proc_name)
+                         else
+                         {
+                             string dst = get_parameter_read_value(paramvals[0]);
+-                            string addr = get_int32_to_ptr(dst, "void(%_cpu*)");
++                            string addr;
++                            if (guest_code_map_file != "")
++                            {
++                                string resolved = get_new_temporary_register();
++                                addr = get_new_temporary_register();
++                                add_output_line(resolved ~ " = call i8* @__guest_resolve(%_cpu* %cpu, i32 " ~ dst ~ ") nounwind");
++                                add_output_line(addr ~ " = bitcast i8* " ~ resolved ~ " to void(%_cpu*)*");
++                            }
++                            else addr = get_int32_to_ptr(dst, "void(%_cpu*)");
+ 
+                             add_output_line("musttail call fastcc void " ~ addr ~ "(%_cpu* %cpu) nounwind");
+                         }
+@@ -3735,6 +3752,7 @@ void write_usage()
+     stderr.writeln("  -pic            generate position independent code");
+     stderr.writeln("  -m64            set generated pointer size to 64 bits");
+     stderr.writeln("  -ptrofs         use pointers with offset (requires -m64)");
++    stderr.writeln("  -guest-code-map FILE  resolve guest code addresses from symbol,hex-address rows");
+     stderr.writeln("  -no-tail-calls  disable generating tail calls");
+     stderr.writeln("  -inline-idiv    allow inlining integer division instructions");
+     stderr.writeln("  -inline-float   allow inlining floating point instructions");
+@@ -3760,6 +3778,8 @@ public int main(string[] args)
+     inline_float_instr = false;
+     inline_float2_instr = false;
+     function_names = (string[string]).init;
++    guest_code_map_file = "";
++    guest_code_addresses = (uint[string]).init;
+     for (int i = 1; i < args.length; i++)
+     {
+         switch(args[i])
+@@ -3809,6 +3829,37 @@ public int main(string[] args)
+             case "-ptrofs":
+                 pointers_with_offset = true;
+                 break;
++            case "-guest-code-map":
++                if (i + 1 == args.length || guest_code_map_file != "")
++                {
++                    stderr.writeln("Missing or repeated guest code map argument");
++                    return 2;
++                }
++                guest_code_map_file = args[++i];
++                try
++                {
++                    bool[uint] seen;
++                    foreach (line; splitLines(readText(guest_code_map_file)))
++                    {
++                        if (strip(line) == "") continue;
++                        auto fields = split(line, ",");
++                        if (fields.length != 2 || strip(fields[0]) == "")
++                            throw new Exception("Expected symbol,hex-address");
++                        string name = strip(fields[0]);
++                        uint address = to!uint(strip(fields[1]), 16);
++                        if (name in guest_code_addresses || address in seen || address == uint.max)
++                            throw new Exception("Duplicate or reserved guest code address");
++                        guest_code_addresses[name] = address;
++                        seen[address] = true;
++                    }
++                    if (guest_code_addresses.length == 0) throw new Exception("Empty guest code map");
++                }
++                catch (Exception error)
++                {
++                    stderr.writeln("Invalid guest code map: ", error.msg);
++                    return 2;
++                }
++                break;
+             case "-inline-idiv":
+                 inline_idiv_instr = true;
+                 break;
+@@ -3860,6 +3911,12 @@ public int main(string[] args)
+         return 3;
+     }
+ 
++    if (guest_code_map_file != "" && (!pointers_with_offset || no_tail_calls))
++    {
++        stderr.writeln("Guest code maps require -m64 -ptrofs and tail calls");
++        return 3;
++    }
++
+     if (input_filename == "")
+     {
+         stderr.writeln("Missing input filename");
+@@ -4980,6 +5037,33 @@ public int main(string[] args)
+         return 0;
+     }
+ 
++    if (guest_code_map_file != "")
++    {
++        foreach (name; proc_list.keys)
++        {
++            if (name !in guest_code_addresses)
++            {
++                stderr.writeln("Missing guest code address for procedure: ", name);
++                return 82;
++            }
++        }
++        foreach (name; guest_code_addresses.keys)
++        {
++            if (name !in proc_list)
++            {
++                stderr.writeln("Guest code map names an unknown procedure: ", name);
++                return 82;
++            }
++        }
++        foreach (segment; dataseg_list)
++            foreach (data; segment.data)
++                if (data.isaddr)
++                {
++                    stderr.writeln("Guest code mode does not yet support relocated data labels");
++                    return 82;
++                }
++    }
++
+     // second pass
+ 
+     define_list = define_list.rehash;
+@@ -5411,7 +5495,72 @@ public int main(string[] args)
+         add_output_line("}");
+     }
+ 
++    if (guest_code_map_file != "")
++    {
++        add_output_line("declare void @tc_unmapped_guest(%_cpu*, i32) cold noreturn nounwind");
++        // C callers supply the guest stack, including the host-return sentinel.
++        // Reuse the static address map and fastcc ABI for native API callbacks.
++        add_output_line("define protected ccc void @tc_guest_invoke(%_cpu* %cpu, i32 %address) nounwind {");
++        add_output_line("%target = call i8* @__guest_resolve(%_cpu* %cpu, i32 %address) nounwind");
++        add_output_line("%function = bitcast i8* %target to void(%_cpu*)*");
++        add_output_line("call fastcc void %function(%_cpu* %cpu) nounwind");
++        add_output_line("ret void");
++        add_output_line("}");
++        // A sorted address table with binary search: same lookup depth as a
++        // lowered switch, but a 260k-case switch takes minutes to optimize.
++        string[] names = guest_code_addresses.keys;
++        names.sort!((a, b) => guest_code_addresses[a] < guest_code_addresses[b]);
++        string count = to!string(names.length);
++        string keys = "@__guest_keys = private unnamed_addr constant [" ~ count ~ " x i32] [";
++        string targets = "@__guest_targets = private unnamed_addr constant [" ~ count ~ " x i8*] [";
++        foreach (index, name; names)
++        {
++            keys ~= (index ? ", " : "") ~ "i32 " ~ to!string(guest_code_addresses[name]);
++            targets ~= (index ? ", " : "") ~ "i8* bitcast (void(%_cpu*)* @" ~ name ~ " to i8*)";
++        }
++        add_output_line(keys ~ "]");
++        add_output_line(targets ~ "]");
++        add_output_line("define private i8* @__guest_resolve(%_cpu* %cpu, i32 %address) nounwind {");
++        add_output_line("entry:");
++        add_output_line("br label %loop");
++        add_output_line("loop:");
++        add_output_line("%lo = phi i32 [0, %entry], [%lo2, %next]");
++        add_output_line("%hi = phi i32 [" ~ count ~ ", %entry], [%hi2, %next]");
++        add_output_line("%empty = icmp uge i32 %lo, %hi");
++        add_output_line("br i1 %empty, label %miss, label %probe");
++        add_output_line("probe:");
++        add_output_line("%sum = add i32 %lo, %hi");
++        add_output_line("%mid = lshr i32 %sum, 1");
++        add_output_line("%index = zext i32 %mid to i64");
++        add_output_line("%keyp = getelementptr [" ~ count ~ " x i32], [" ~ count ~ " x i32]* @__guest_keys, i64 0, i64 %index");
++        add_output_line("%key = load i32, i32* %keyp, align 4");
++        add_output_line("%found = icmp eq i32 %key, %address");
++        add_output_line("br i1 %found, label %hit, label %next");
++        add_output_line("next:");
++        add_output_line("%below = icmp ult i32 %key, %address");
++        add_output_line("%above = add i32 %mid, 1");
++        add_output_line("%lo2 = select i1 %below, i32 %above, i32 %lo");
++        add_output_line("%hi2 = select i1 %below, i32 %hi, i32 %mid");
++        add_output_line("br label %loop");
++        add_output_line("hit:");
++        add_output_line("%targetp = getelementptr [" ~ count ~ " x i8*], [" ~ count ~ " x i8*]* @__guest_targets, i64 0, i64 %index");
++        add_output_line("%target = load i8*, i8** %targetp, align 8");
++        add_output_line("ret i8* %target");
++        add_output_line("miss:");
++        if (return_procedure != "")
++        {
++            add_output_line("%host = icmp eq i32 %address, 4294967295");
++            add_output_line("br i1 %host, label %host_return, label %unmapped");
++            add_output_line("host_return:");
++            add_output_line("ret i8* bitcast (void(%_cpu*)* @" ~ return_procedure ~ " to i8*)");
++        }
++        else add_output_line("br label %unmapped");
++        add_output_line("unmapped:");
++        add_output_line("call void @tc_unmapped_guest(%_cpu* %cpu, i32 %address)");
++        add_output_line("unreachable");
++        add_output_line("}");
++    }
++
+     write_output();
+     return 0;
+ }
+-
